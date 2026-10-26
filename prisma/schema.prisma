@@ -6,3 +6,116 @@ datasource db {
   provider = "sqlite"
   url      = env("DATABASE_URL")
 }
+
+model Usuario {
+  id              Int          @id @default(autoincrement())
+  email           String       @unique
+  nombre          String
+  password        String
+  rol             String       @default("Paciente")
+  dni             String?
+  fechaNacimiento String?
+  celular         String?
+  direccion       String?
+  createdAt       DateTime     @default(now())
+
+  familiares      Parentesco[]
+  turnosCreados   Turno[]      @relation("UsuarioCreador")
+}
+
+model Parentesco {
+  id         Int      @id @default(autoincrement())
+  parentesco String   // ej: "Madre", "Hijo"
+
+  usuarioId  Int
+  usuario    Usuario  @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+
+  familiarId Int
+  familiar   Familiar @relation(fields: [familiarId], references: [id], onDelete: Cascade)
+
+  @@unique([usuarioId, familiarId])
+}
+
+model Familiar {
+  id                 Int          @id @default(autoincrement())
+  nombre             String
+  apellido           String
+  dni                String
+  fechaNacimiento    String
+  obraSocial         String?
+  celular            String?
+  contactoEmergencia String?
+
+  usuarios           Parentesco[]
+}
+
+model Hospital {
+  id        String  @id @default(uuid())
+  nombre    String
+  direccion String
+  lat       Float?
+  lon       Float?
+
+  turnos    Turno[]
+}
+
+model Turno {
+  id              Int       @id @default(autoincrement())
+
+  hospitalId      String
+  hospital        Hospital  @relation(fields: [hospitalId], references: [id])
+
+  creadorId       Int?
+  creador         Usuario?  @relation("UsuarioCreador", fields: [creadorId], references: [id])
+
+  pacienteNombre  String
+  pacienteDni     String
+  pacienteEdad    Int?
+  pacienteSexo    String?
+  pacientePresion String?
+
+  motivo          String
+  tipoIncidente   String?
+  nivel           String
+  color           String?
+  estado          String    @default("Pendiente")
+  tiempoEstimado  Int?
+
+  valido          Boolean   @default(true)
+
+  fechaCreacion   DateTime  @default(now())
+  fechaAtencion   DateTime?
+
+  triaje          RespuestasTriaje?
+}
+
+model RespuestasTriaje {
+  id                     Int      @id @default(autoincrement())
+
+  turnoId                Int      @unique
+  turno                  Turno    @relation(fields: [turnoId], references: [id], onDelete: Cascade)
+
+  dificultadRespiratoria Boolean  @default(false)
+  dolorPechoConSintomas  Boolean  @default(false)
+  signosACV              Boolean  @default(false)
+  perdidaConciencia      Boolean  @default(false)
+  sangradoIncontrolable  Boolean  @default(false)
+  embarazoConAlarma      Boolean  @default(false)
+  convulsionReciente     Boolean  @default(false)
+
+  escalaDolor            Int?
+  tiempoSintomas         String?
+  evolucion              String?
+  estadoConciencia       String?
+
+  temperatura            Float?
+  frecuenciaCardiaca     Int?
+  frecuenciaRespiratoria Int?
+  saturacionOxigeno      Int?
+  glucemia               Int?
+  glasgow                Int?
+
+  tratamientoPrevio      String?
+  enfermedadCronica      Boolean  @default(false)
+  embarazo               Boolean  @default(false)
+}
