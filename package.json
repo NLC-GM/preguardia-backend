@@ -4,9 +4,9 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-     "dev": "tsx watch src/index.ts",
-     "db:init": "prisma db push && prisma generate"
-   },
+    "dev": "tsx watch src/index.ts",
+    "db:init": "prisma db push && prisma generate"
+  },
   "keywords": [],
   "author": "",
   "license": "ISC",
@@ -19,9 +19,12 @@
   "devDependencies": {
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
-    "@types/node": "^26.6.5",
+    "@types/node": "^26.6.6",
     "prisma": "^6.19.3",
     "tsx": "^4.23.15",
     "typescript": "^6.0.3"
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
   }
 }

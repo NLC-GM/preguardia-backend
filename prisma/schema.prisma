@@ -17,7 +17,12 @@ model Usuario {
   fechaNacimiento String?
   celular         String?
   direccion       String?
+  activo          Boolean      @default(true) // <--- NUEVO: Para el borrado lógico
   createdAt       DateTime     @default(now())
+
+  // NUEVO: Relación con el hospital (opcional, porque un Paciente no tiene hospital)
+  hospitalId      String?      
+  hospital        Hospital?    @relation(fields: [hospitalId], references: [id])
 
   familiares      Parentesco[]
   turnosCreados   Turno[]      @relation("UsuarioCreador")
@@ -55,8 +60,10 @@ model Hospital {
   direccion String
   lat       Float?
   lon       Float?
+  imagen    String?
 
   turnos    Turno[]
+  usuarios  Usuario[] // <--- NUEVO: Lista de empleados (admin, secretaria, ambulancia)
 }
 
 model Turno {

@@ -16,6 +16,44 @@ router.get("/", async (_req, res) => {
 });
 
 // GET /api/hospitales/:id — uno solo
+// GET /api/hospitales/:id/stats - Estadísticas de ocupación
+router.get("/:id/stats", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Buscamos los turnos usando el estado 'Pendiente' de tu schema
+    const turnos = await prisma.turno.findMany({
+      where: {
+        hospitalId: id,
+        estado: 'Pendiente', 
+      },
+    });
+
+    const totalEnEspera = turnos.length;
+    
+    // Filtramos usando la propiedad 'nivel' de tu schema
+    const niveles = {
+      'Resucitación': turnos.filter(t => t.nivel === 'Resucitación').length,
+      'Emergencia': turnos.filter(t => t.nivel === 'Emergencia').length,
+      'Urgencia': turnos.filter(t => t.nivel === 'Urgencia').length,
+      'Menos Urgente': turnos.filter(t => t.nivel === 'Menos Urgente').length,
+      'No Urgente': turnos.filter(t => t.nivel === 'No Urgente').length,
+    };
+
+    const demoraEstimadaMinutos = totalEnEspera * 15; 
+
+    res.json({
+      totalEnEspera,
+      demoraEstimadaMinutos,
+      niveles
+    });
+
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Error al calcular estadísticas" });
+  }
+});
+
 router.get("/:id", async (req, res) => {
   try {
     const hospital = await prisma.hospital.findUnique({
