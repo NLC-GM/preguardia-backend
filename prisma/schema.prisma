@@ -46,9 +46,8 @@ model Familiar {
   nombre             String
   dni                String
   fechaNacimiento    String
-  obraSocial         String?
   celular            String?
-  contactoEmergencia String?
+  
 
   usuarios           Parentesco[]
 }
@@ -76,6 +75,7 @@ model Turno {
 
   pacienteNombre  String
   pacienteDni     String
+  pacienteTelefono String?
   pacienteEdad    Int?
   pacienteSexo    String?
   pacientePresion String?

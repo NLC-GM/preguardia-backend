@@ -180,9 +180,9 @@ const aplanarFamiliar = (p: any) => ({
   nombre: p.familiar.nombre,
   dni: p.familiar.dni,
   fechaNacimiento: p.familiar.fechaNacimiento,
-  obraSocial: p.familiar.obraSocial,
+ 
   celular: p.familiar.celular,
-  contactoEmergencia: p.familiar.contactoEmergencia,
+  
 });
 
 // GET /api/usuarios/:id/familiares
@@ -210,7 +210,7 @@ router.post('/usuarios/:id/familiares', async (req, res) => {
     const usuarioId = Number(req.params.id);
     if (Number.isNaN(usuarioId)) return res.status(400).json({ error: 'Id inválido' });
 
-    const { parentesco, nombre, dni, fechaNacimiento, obraSocial, celular, contactoEmergencia } = req.body;
+    const { parentesco, nombre, dni, fechaNacimiento, celular } = req.body;
 
     if (!parentesco || !nombre?.trim() || !dni?.trim() || !fechaNacimiento?.trim()) {
       return res.status(400).json({ error: 'Faltan datos obligatorios' });
@@ -230,9 +230,9 @@ router.post('/usuarios/:id/familiares', async (req, res) => {
           nombre: String(nombre).trim(),
           dni: dniLimpio,
           fechaNacimiento: String(fechaNacimiento).trim(),
-          obraSocial: opcional(obraSocial),
+         
           celular: opcional(celular),
-          contactoEmergencia: opcional(contactoEmergencia),
+          
         },
       });
     }

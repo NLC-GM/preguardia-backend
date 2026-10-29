@@ -6,6 +6,13 @@ const router = Router();
 // Únicos nombres de nivel de triaje permitidos en la base
 const NIVELES_VALIDOS = ['Emergencia', 'Urgente', 'Moderado', 'Leve', 'Sin urgencia'];
 
+const PRIORIDAD: Record<string, number> = {
+  'Emergencia': 0, 'Urgente': 1, 'Moderado': 2, 'Leve': 3, 'Sin urgencia': 4,
+  
+  'Resucitación': 0, 'Urgencia': 1, 'Menos Urgente': 3, 'No Urgente': 4,
+};
+const prioridad = (nivel: string) => PRIORIDAD[nivel] ?? 99;
+const MINUTOS_POR_PACIENTE = 15; // el mismo valor que usa /hospitales/:id/stats
 const enteroOpcional = (v: unknown) =>
   v === undefined || v === null || v === '' || Number.isNaN(Number(v)) ? null : Number(v);
 
@@ -31,7 +38,7 @@ const turnoVigentePorUsuario = (usuarioId: number) =>
 router.post('/', async (req, res) => {
   try {
     const {
-      hospitalId, creadorId, pacienteNombre, pacienteDni, pacienteEdad,
+      hospitalId, creadorId, pacienteNombre, pacienteDni, pacienteEdad, pacienteTelefono,
       motivo, nivel, color, triaje,
     } = req.body;
 
@@ -53,6 +60,7 @@ router.post('/', async (req, res) => {
         pacienteNombre,
         pacienteDni: String(pacienteDni ?? '').replace(/\D/g, ''),
         pacienteEdad: enteroOpcional(pacienteEdad),
+        pacienteTelefono: texto(pacienteTelefono),
         motivo: motivo || 'Emergencia',
         nivel,
         color,
@@ -264,7 +272,34 @@ router.get('/paciente/:usuarioId/activo', async (req, res) => {
       orderBy: { fechaCreacion: 'desc' },
     });
 
-    return res.json(turno);
+        if (!turno) return res.json(null);
+
+    // Pacientes que ya están en la sala de ese hospital (sin contar este turno)
+    const enSala = await prisma.turno.findMany({
+      where: {
+        hospitalId: turno.hospitalId,
+        valido: true,
+        estado: 'Activo',
+        id: { not: turno.id },
+      },
+      select: { nivel: true, fechaCreacion: true },
+    });
+
+    const miPrioridad = prioridad(turno.nivel);
+    const personasAdelante = enSala.filter((t) => {
+      const p = prioridad(t.nivel);
+      if (p !== miPrioridad) return p < miPrioridad;   // más urgente → va antes
+      // Mismo nivel: si todavía no llegué, todos los que ya están en sala van antes;
+      // si ya llegué, solo los que se registraron antes que yo
+      return turno.estado === 'Pendiente' || t.fechaCreacion < turno.fechaCreacion;
+    }).length;
+
+    return res.json({
+      ...turno,
+      personasAdelante,
+      posicion: personasAdelante + 1,
+      esperaEstimadaMin: personasAdelante * MINUTOS_POR_PACIENTE,
+    });
   } catch (error) {
     console.error(error);
     return res.status(500).json({ error: 'Error al obtener el turno' });
