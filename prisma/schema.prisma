@@ -13,7 +13,7 @@ model Usuario {
   nombre          String
   password        String
   rol             String       @default("Paciente")
-  dni             String?
+  dni             String?      @unique
   fechaNacimiento String?
   celular         String?
   direccion       String?
@@ -44,7 +44,6 @@ model Parentesco {
 model Familiar {
   id                 Int          @id @default(autoincrement())
   nombre             String
-  apellido           String
   dni                String
   fechaNacimiento    String
   obraSocial         String?

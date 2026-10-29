@@ -15,42 +15,50 @@ router.get("/", async (_req, res) => {
   }
 });
 
-// GET /api/hospitales/:id — uno solo
-// GET /api/hospitales/:id/stats - Estadísticas de ocupación
+
+
+// GET /api/hospitales/:id/stats - Ocupación actual de la guardia
+const NIVELES_TRIAJE = ['Emergencia', 'Urgente', 'Moderado', 'Leve', 'Sin urgencia'];
+
+// Por si quedó algún turno con los nombres viejos
+const NOMBRES_VIEJOS: Record<string, string> = {
+  'Resucitación': 'Emergencia',
+  'Urgencia': 'Urgente',
+  'Menos Urgente': 'Leve',
+  'No Urgente': 'Sin urgencia',
+};
+
 router.get("/:id/stats", async (req, res) => {
   try {
-    const { id } = req.params;
-
-    // Buscamos los turnos usando el estado 'Pendiente' de tu schema
     const turnos = await prisma.turno.findMany({
       where: {
-        hospitalId: id,
-        estado: 'Pendiente', 
+        hospitalId: req.params.id,
+        valido: true,
+        estado: { in: ['Pendiente', 'Activo'] },
       },
+      select: { nivel: true, estado: true },
     });
 
-    const totalEnEspera = turnos.length;
-    
-    // Filtramos usando la propiedad 'nivel' de tu schema
-    const niveles = {
-      'Resucitación': turnos.filter(t => t.nivel === 'Resucitación').length,
-      'Emergencia': turnos.filter(t => t.nivel === 'Emergencia').length,
-      'Urgencia': turnos.filter(t => t.nivel === 'Urgencia').length,
-      'Menos Urgente': turnos.filter(t => t.nivel === 'Menos Urgente').length,
-      'No Urgente': turnos.filter(t => t.nivel === 'No Urgente').length,
-    };
+    // Ocupación real: solo los pacientes que ya están en la guardia
+    const enGuardia = turnos.filter((t) => t.estado === 'Activo');
+    const enCamino = turnos.filter((t) => t.estado === 'Pendiente').length;
 
-    const demoraEstimadaMinutos = totalEnEspera * 15; 
+    const niveles: Record<string, number> = Object.fromEntries(NIVELES_TRIAJE.map((n) => [n, 0]));
+    for (const t of enGuardia) {
+      const nivel = NOMBRES_VIEJOS[t.nivel] ?? t.nivel;
+      niveles[nivel] = (niveles[nivel] ?? 0) + 1;
+    }
 
-    res.json({
-      totalEnEspera,
-      demoraEstimadaMinutos,
-      niveles
+    return res.json({
+      totalEnEspera: enGuardia.length,
+      enSala: enGuardia.length,
+      enCamino,
+      demoraEstimadaMinutos: enGuardia.length * 15,
+      niveles,
     });
-
   } catch (error) {
     console.error(error);
-    res.status(500).json({ error: "Error al calcular estadísticas" });
+    return res.status(500).json({ error: "Error al calcular estadísticas" });
   }
 });
 
