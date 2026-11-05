@@ -30,7 +30,6 @@ export function generarToken(usuario: { id: number; rol: string }) {
   return jwt.sign(payload, JWT_SECRET!, { expiresIn: DURACION_TOKEN });
 }
 
-// Exige un token válido en "Authorization: Bearer <token>" y deja el usuario en req.usuario
 export async function requiereAuth(req: Request, res: Response, next: NextFunction) {
   const header = req.headers.authorization;
   if (!header?.startsWith('Bearer ')) {
@@ -65,8 +64,6 @@ export async function requiereAuth(req: Request, res: Response, next: NextFuncti
   }
 }
 
-// Usar después de requiereAuth: el :param de la URL tiene que ser el id del usuario logueado.
-// Ej: router.get('/usuarios/:id', soloPropio('id'), ...)
 export function soloPropio(param: string) {
   return (req: Request, res: Response, next: NextFunction) => {
     if (!req.usuario || Number(req.params[param]) !== req.usuario.id) {
@@ -76,7 +73,6 @@ export function soloPropio(param: string) {
   };
 }
 
-// Usar después de requiereAuth: requiereRol('Admin'), requiereRol('Secretaria', 'Admin'), etc.
 export function requiereRol(...roles: string[]) {
   return (req: Request, res: Response, next: NextFunction) => {
     if (!req.usuario || !roles.includes(req.usuario.rol)) {

@@ -6,7 +6,6 @@ import { ERROR_DNI, esDniValido, limpiarDni } from '../utils/validaciones';
 
 const router = Router();
 
-// POST /api/auth/login
 router.post('/login', async (req, res) => {
   const { email, password } = req.body;
 
@@ -31,7 +30,6 @@ router.post('/login', async (req, res) => {
       return res.status(403).json({ error: 'Esta cuenta fue desactivada' });
     }
 
-    // Usuario de antes de bcrypt: guardamos su contraseña hasheada
     if (necesitaRehash) {
       await prisma.usuario.update({
         where: { id: usuario.id },
@@ -47,7 +45,6 @@ router.post('/login', async (req, res) => {
   }
 });
 
-// POST /api/auth/registro - Crear cuenta de paciente
 router.post('/registro', async (req, res) => {
   const { nombre, email, password, dni } = req.body;
 
@@ -68,7 +65,6 @@ router.post('/registro', async (req, res) => {
       return res.status(409).json({ error: 'Ese correo ya está registrado' });
     }
 
-    // El DNI es único entre TODOS los usuarios (pacientes, admins, secretarias, ambulancias)
     const existeDni = await prisma.usuario.findUnique({ where: { dni: dniLimpio } });
     if (existeDni) {
       return res.status(409).json({ error: 'Ya existe una cuenta con ese DNI' });
@@ -95,7 +91,6 @@ router.post('/registro', async (req, res) => {
   }
 });
 
-// POST /api/auth/restablecer - Cambia la contraseña si el email y el DNI son de la misma persona
 router.post('/restablecer', async (req, res) => {
   const { email, dni, nuevaPassword } = req.body;
 
@@ -112,7 +107,6 @@ router.post('/restablecer', async (req, res) => {
   try {
     const usuario = await prisma.usuario.findUnique({ where: { email: emailLimpio } });
 
-    // Mismo mensaje si no existe o si el DNI no coincide
     if (!usuario || !usuario.dni || usuario.dni !== dniLimpio) {
       return res.status(400).json({ error: 'El correo y el DNI no coinciden con ninguna cuenta' });
     }

@@ -5,12 +5,10 @@ import { ERROR_DNI, esDniValido, limpiarDni } from '../utils/validaciones';
 
 const router = Router();
 
-// Personal del hospital: puede ver y gestionar los turnos de SU hospital
 const ROLES_PERSONAL = ['Secretaria', 'Admin'];
 const esPersonalDelHospital = (usuario: UsuarioSesion, hospitalId: string) =>
   ROLES_PERSONAL.includes(usuario.rol) && usuario.hospitalId === hospitalId;
 
-// ¿El usuario creó el turno, o es el paciente del turno (mismo DNI)?
 const esDuenioDelTurno = async (
   usuario: UsuarioSesion,
   turno: { creadorId: number | null; pacienteDni: string | null },
@@ -21,7 +19,6 @@ const esDuenioDelTurno = async (
   return !!yo?.dni && yo.dni === turno.pacienteDni;
 };
 
-// Únicos nombres de nivel de triaje permitidos en la base
 const NIVELES_VALIDOS = ['Emergencia', 'Urgente', 'Moderado', 'Leve', 'Sin urgencia'];
 
 const PRIORIDAD: Record<string, number> = {
@@ -30,7 +27,7 @@ const PRIORIDAD: Record<string, number> = {
   'Resucitación': 0, 'Urgencia': 1, 'Menos Urgente': 3, 'No Urgente': 4,
 };
 const prioridad = (nivel: string) => PRIORIDAD[nivel] ?? 99;
-const MINUTOS_POR_PACIENTE = 15; // el mismo valor que usa /hospitales/:id/stats
+const MINUTOS_POR_PACIENTE = 15;
 const enteroOpcional = (v: unknown) =>
   v === undefined || v === null || v === '' || Number.isNaN(Number(v)) ? null : Number(v);
 
@@ -38,7 +35,6 @@ const texto = (v: unknown) => (v == null || String(v).trim() === '' ? null : Str
 
 const decimal = (v: unknown) =>
   v === undefined || v === null || v === '' || Number.isNaN(Number(v)) ? null : Number(v);
-// Busca si ese usuario ya creó un turno que sigue pendiente o activo
 const turnoVigentePorUsuario = (usuarioId: number) =>
   prisma.turno.findFirst({
     where: {
@@ -48,18 +44,14 @@ const turnoVigentePorUsuario = (usuarioId: number) =>
     },
     include: { hospital: { select: { nombre: true } } },
   });
-// ─────────────────────────────────────────────────────────────
-// CREAR TURNOS
-// ─────────────────────────────────────────────────────────────
 
-// POST /api/turnos - El paciente crea un pre-registro desde la app
 router.post('/', requiereRol('Paciente'), async (req, res) => {
   try {
     const {
       hospitalId, pacienteNombre, pacienteDni, pacienteEdad, pacienteTelefono,
       motivo, nivel, color, triaje,
     } = req.body;
-    const creadorId = req.usuario!.id; // sale del token, no del body
+    const creadorId = req.usuario!.id;
 
     if (!NIVELES_VALIDOS.includes(nivel)) {
       return res.status(400).json({ error: `Nivel de triaje inválido: ${nivel}` });
@@ -113,7 +105,6 @@ router.post('/', requiereRol('Paciente'), async (req, res) => {
   }
 });
 
-// POST /api/turnos/presencial - La secretaria ingresa un paciente que llegó sin pre-registro
 router.post('/presencial', requiereRol('Secretaria'), async (req, res) => {
   try {
     const { pacienteNombre, pacienteDni, pacienteEdad, motivo, nivel, color } = req.body;
@@ -128,7 +119,6 @@ router.post('/presencial', requiereRol('Secretaria'), async (req, res) => {
       return res.status(400).json({ error: ERROR_DNI });
     }
 
-    // La secretaria (y su hospital) salen del token, no del frontend
     const secretaria = req.usuario!;
     if (!secretaria.hospitalId) {
       return res.status(400).json({ error: 'Tu cuenta no tiene hospital asignado' });
@@ -144,7 +134,7 @@ router.post('/presencial', requiereRol('Secretaria'), async (req, res) => {
         motivo: String(motivo).trim(),
         nivel: String(nivel),
         color: color ?? null,
-        estado: 'Activo', // entra directo a la sala de espera
+        estado: 'Activo',
       },
     });
 
@@ -155,7 +145,6 @@ router.post('/presencial', requiereRol('Secretaria'), async (req, res) => {
   }
 });
 
-// POST /api/turnos/ambulancia - La ambulancia notifica un traslado al hospital de destino
 router.post('/ambulancia', requiereRol('Ambulancia', 'Profesional'), async (req, res) => {
   try {
     const {
@@ -170,12 +159,11 @@ router.post('/ambulancia', requiereRol('Ambulancia', 'Profesional'), async (req,
       return res.status(400).json({ error: `Nivel de triaje inválido: ${nivel}` });
     }
 
-    // El DNI es opcional (paciente NN), pero si viene tiene que ser válido
     if (limpiarDni(pacienteDni) && !esDniValido(pacienteDni)) {
       return res.status(400).json({ error: `${ERROR_DNI} (o dejalo vacío)` });
     }
 
-    const ambulancia = req.usuario!; // sale del token, no del body
+    const ambulancia = req.usuario!;
 
     const hospital = await prisma.hospital.findUnique({ where: { id: String(hospitalId) } });
     if (!hospital) return res.status(404).json({ error: 'Hospital no encontrado' });
@@ -190,10 +178,10 @@ router.post('/ambulancia', requiereRol('Ambulancia', 'Profesional'), async (req,
         pacienteSexo: texto(pacienteSexo),
         pacientePresion: texto(pacientePresion),
         motivo: texto(motivo) ?? texto(tipoIncidente) ?? 'Traslado en ambulancia',
-        tipoIncidente: texto(tipoIncidente) ?? 'Sin especificar', // marca que vino en ambulancia
+        tipoIncidente: texto(tipoIncidente) ?? 'Sin especificar',
         nivel: String(nivel),
         color: color ?? null,
-        estado: 'Pendiente', // en camino
+        estado: 'Pendiente',
         triaje: {
           create: {
             estadoConciencia: texto(signos?.estadoConciencia),
@@ -217,11 +205,6 @@ router.post('/ambulancia', requiereRol('Ambulancia', 'Profesional'), async (req,
   }
 });
 
-// ─────────────────────────────────────────────────────────────
-// LISTADOS
-// ─────────────────────────────────────────────────────────────
-
-// GET /api/turnos/hospital/:hospitalId?estados=Pendiente,Activo&hoy=1
 router.get('/hospital/:hospitalId', async (req, res) => {
   try {
     if (!esPersonalDelHospital(req.usuario!, req.params.hospitalId)) {
@@ -235,7 +218,6 @@ router.get('/hospital/:hospitalId', async (req, res) => {
 
     const where: any = { hospitalId: req.params.hospitalId, estado: { in: estados } };
 
-    // hoy=1 → atendidos hoy, o cancelados creados hoy (no tienen fechaAtencion)
     if (req.query.hoy === '1') {
       const inicioDelDia = new Date();
       inicioDelDia.setHours(0, 0, 0, 0);
@@ -257,7 +239,6 @@ router.get('/hospital/:hospitalId', async (req, res) => {
   }
 });
 
-// GET /api/turnos/ambulancia/:usuarioId - Traslados realizados por esa ambulancia
 router.get('/ambulancia/:usuarioId', soloPropio('usuarioId'), async (req, res) => {
   try {
     const usuarioId = Number(req.params.usuarioId);
@@ -276,7 +257,6 @@ router.get('/ambulancia/:usuarioId', soloPropio('usuarioId'), async (req, res) =
   }
 });
 
-// GET /api/turnos/paciente/:usuarioId/activo - Turno vigente del paciente (o null)
 router.get('/paciente/:usuarioId/activo', soloPropio('usuarioId'), async (req, res) => {
   try {
     const usuarioId = Number(req.params.usuarioId);
@@ -300,7 +280,6 @@ router.get('/paciente/:usuarioId/activo', soloPropio('usuarioId'), async (req, r
 
         if (!turno) return res.json(null);
 
-    // Pacientes que ya están en la sala de ese hospital (sin contar este turno)
     const enSala = await prisma.turno.findMany({
       where: {
         hospitalId: turno.hospitalId,
@@ -314,9 +293,7 @@ router.get('/paciente/:usuarioId/activo', soloPropio('usuarioId'), async (req, r
     const miPrioridad = prioridad(turno.nivel);
     const personasAdelante = enSala.filter((t) => {
       const p = prioridad(t.nivel);
-      if (p !== miPrioridad) return p < miPrioridad;   // más urgente → va antes
-      // Mismo nivel: si todavía no llegué, todos los que ya están en sala van antes;
-      // si ya llegué, solo los que se registraron antes que yo
+      if (p !== miPrioridad) return p < miPrioridad;
       return turno.estado === 'Pendiente' || t.fechaCreacion < turno.fechaCreacion;
     }).length;
 
@@ -332,7 +309,6 @@ router.get('/paciente/:usuarioId/activo', soloPropio('usuarioId'), async (req, r
   }
 });
 
-// GET /api/turnos/paciente/:usuarioId/historial - Finalizados y cancelados del paciente
 router.get('/paciente/:usuarioId/historial', soloPropio('usuarioId'), async (req, res) => {
   try {
     const usuarioId = Number(req.params.usuarioId);
@@ -360,22 +336,17 @@ router.get('/paciente/:usuarioId/historial', soloPropio('usuarioId'), async (req
   }
 });
 
-// ─────────────────────────────────────────────────────────────
-// UN TURNO (estas rutas van al final porque usan /:id)
-// ─────────────────────────────────────────────────────────────
-// GET /api/turnos/usuario/:usuarioId/vigente - ¿Este usuario ya tiene un turno pendiente o activo?
 router.get('/usuario/:usuarioId/vigente', soloPropio('usuarioId'), async (req, res) => {
   try {
     const usuarioId = Number(req.params.usuarioId);
     if (Number.isNaN(usuarioId)) return res.status(400).json({ error: 'Id inválido' });
     const turno = await turnoVigentePorUsuario(usuarioId);
-    return res.json(turno); // null si no tiene
+    return res.json(turno);
   } catch (error) {
     console.error(error);
     return res.status(500).json({ error: 'Error al verificar turnos' });
   }
 });
-// GET /api/turnos/:id - Detalle de un turno (con triaje y hospital)
 router.get('/:id', async (req, res) => {
   try {
     const id = Number(req.params.id);
@@ -399,7 +370,6 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-// PATCH /api/turnos/:id - La secretaria edita la ficha (re-evaluación)
 router.patch('/:id', requiereRol(...ROLES_PERSONAL), async (req, res) => {
   try {
     const id = Number(req.params.id);
@@ -434,7 +404,6 @@ router.patch('/:id', requiereRol(...ROLES_PERSONAL), async (req, res) => {
   }
 });
 
-// PATCH /api/turnos/:id/estado  body: { estado: 'Activo' | 'Cancelado' | 'Finalizado' }
 router.patch('/:id/estado', async (req, res) => {
   try {
     const { estado } = req.body;
@@ -452,8 +421,6 @@ router.patch('/:id/estado', async (req, res) => {
     });
     if (!existente) return res.status(404).json({ error: 'Turno no encontrado' });
 
-    // El personal del hospital puede cualquier estado; el creador o el paciente
-    // solo pueden avisar que llegaron (Activo) o cancelar
     const usuario = req.usuario!;
     if (!esPersonalDelHospital(usuario, existente.hospitalId)) {
       if (!(await esDuenioDelTurno(usuario, existente))) {

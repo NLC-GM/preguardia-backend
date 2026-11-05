@@ -17,10 +17,8 @@ app.get("/api/health", (_req, res) => {
   res.json({ ok: true });
 });
 
-// Públicas: /api/health (arriba) y /api/auth (login, registro, restablecer)
 app.use("/api/auth", authRoutes);
 
-// Todo lo que sigue exige un token de sesión válido
 app.use("/api", requiereAuth);
 app.use("/api/turnos", turnosRoutes);
 app.use("/api/hospitales", hospitalesRouter);

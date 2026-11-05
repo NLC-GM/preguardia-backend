@@ -1,9 +1,4 @@
-// Validaciones compartidas de DNI y fecha de nacimiento.
-// El front tiene las mismas reglas en preguardia-app/src/utils/validaciones.ts
-
 const EDAD_MAXIMA = 120;
-
-// ---------- DNI ----------
 
 export const limpiarDni = (dni: unknown) => String(dni ?? '').replace(/\D/g, '');
 
@@ -11,9 +6,6 @@ export const esDniValido = (dni: unknown) => /^\d{7,8}$/.test(limpiarDni(dni));
 
 export const ERROR_DNI = 'El DNI debe tener 7 u 8 números';
 
-// ---------- Fecha (DD/MM/AAAA) ----------
-
-// Devuelve el mensaje de error, o null si la fecha de nacimiento es válida
 export function errorFechaNacimiento(fecha: unknown): string | null {
   const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(String(fecha ?? '').trim());
   if (!m) return 'La fecha de nacimiento debe tener el formato DD/MM/AAAA';

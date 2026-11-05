@@ -4,7 +4,6 @@ import { requiereRol } from "../middleware/auth";
 
 const router = Router();
 
-// GET /api/hospitales — listar todos
 router.get("/", async (_req, res) => {
   try {
     const hospitales = await prisma.hospital.findMany({
@@ -16,12 +15,8 @@ router.get("/", async (_req, res) => {
   }
 });
 
-
-
-// GET /api/hospitales/:id/stats - Ocupación actual de la guardia
 const NIVELES_TRIAJE = ['Emergencia', 'Urgente', 'Moderado', 'Leve', 'Sin urgencia'];
 
-// Por si quedó algún turno con los nombres viejos
 const NOMBRES_VIEJOS: Record<string, string> = {
   'Resucitación': 'Emergencia',
   'Urgencia': 'Urgente',
@@ -40,7 +35,6 @@ router.get("/:id/stats", async (req, res) => {
       select: { nivel: true, estado: true },
     });
 
-    // Ocupación real: solo los pacientes que ya están en la guardia
     const enGuardia = turnos.filter((t) => t.estado === 'Activo');
     const enCamino = turnos.filter((t) => t.estado === 'Pendiente').length;
 
@@ -75,7 +69,6 @@ router.get("/:id", async (req, res) => {
   }
 });
 
-// POST /api/hospitales — crear uno
 router.post("/", requiereRol("Admin"), async (req, res) => {
   const { nombre, direccion, lat, lon } = req.body;
 

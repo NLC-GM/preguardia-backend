@@ -17,11 +17,10 @@ model Usuario {
   fechaNacimiento String?
   celular         String?
   direccion       String?
-  activo          Boolean      @default(true) // <--- NUEVO: Para el borrado lógico
+  activo          Boolean      @default(true)
   createdAt       DateTime     @default(now())
 
-  // NUEVO: Relación con el hospital (opcional, porque un Paciente no tiene hospital)
-  hospitalId      String?      
+  hospitalId      String?
   hospital        Hospital?    @relation(fields: [hospitalId], references: [id])
 
   familiares      Parentesco[]
@@ -30,7 +29,7 @@ model Usuario {
 
 model Parentesco {
   id         Int      @id @default(autoincrement())
-  parentesco String   // ej: "Madre", "Hijo"
+  parentesco String
 
   usuarioId  Int
   usuario    Usuario  @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
@@ -47,7 +46,7 @@ model Familiar {
   dni                String
   fechaNacimiento    String
   celular            String?
-  
+
 
   usuarios           Parentesco[]
 }
@@ -61,7 +60,7 @@ model Hospital {
   imagen    String?
 
   turnos    Turno[]
-  usuarios  Usuario[] // <--- NUEVO: Lista de empleados (admin, secretaria, ambulancia)
+  usuarios  Usuario[]
 }
 
 model Turno {

@@ -6,7 +6,6 @@ import { ERROR_DNI, errorFechaNacimiento, esDniValido, limpiarDni } from '../uti
 
 const router = Router();
 
-// Cuando Prisma tira P2002 (dato único repetido), dice qué campo fue: email o dni
 const campoDuplicado = (error: any): 'email' | 'dni' | null => {
   if (error?.code !== 'P2002') return null;
   const target = JSON.stringify(error?.meta?.target ?? '');
@@ -27,11 +26,6 @@ const SELECT_USUARIO = {
   hospital: { select: { id: true, nombre: true } },
 } as const;
 
-// ─────────────────────────────────────────────────────────────
-// PERSONAL (lo usa el admin)
-// ─────────────────────────────────────────────────────────────
-
-// POST /api/usuarios/personal - El admin crea personal para SU hospital
 router.post('/usuarios/personal', requiereRol('Admin'), async (req, res) => {
   try {
     const { nombre, dni, email, password, rol } = req.body;
@@ -46,7 +40,6 @@ router.post('/usuarios/personal', requiereRol('Admin'), async (req, res) => {
       return res.status(400).json({ error: ERROR_DNI });
     }
 
-    // El admin sale del token, no del body
     const admin = req.usuario!;
     if (!admin.hospitalId) {
       return res.status(400).json({ error: 'Tu cuenta de administrador no tiene hospital asignado' });
@@ -75,7 +68,6 @@ router.post('/usuarios/personal', requiereRol('Admin'), async (req, res) => {
   }
 });
 
-// GET /api/hospitales/:hospitalId/personal - Personal activo de un hospital
 router.get('/hospitales/:hospitalId/personal', requiereRol('Admin'), async (req, res) => {
   try {
     if (req.usuario!.hospitalId !== req.params.hospitalId) {
@@ -97,7 +89,6 @@ router.get('/hospitales/:hospitalId/personal', requiereRol('Admin'), async (req,
   }
 });
 
-// PATCH /api/usuarios/:id/desactivar - Borrado lógico
 router.patch('/usuarios/:id/desactivar', requiereRol('Admin'), async (req, res) => {
   try {
     const id = Number(req.params.id);
@@ -106,7 +97,6 @@ router.patch('/usuarios/:id/desactivar', requiereRol('Admin'), async (req, res) 
     const usuario = await prisma.usuario.findUnique({ where: { id } });
     if (!usuario) return res.status(404).json({ error: 'Usuario no encontrado' });
 
-    // Un admin solo puede desactivar secretarias y ambulancias de su propio hospital
     if (
       !['Secretaria', 'Ambulancia'].includes(usuario.rol) ||
       usuario.hospitalId !== req.usuario!.hospitalId
@@ -122,11 +112,6 @@ router.patch('/usuarios/:id/desactivar', requiereRol('Admin'), async (req, res) 
   }
 });
 
-// ─────────────────────────────────────────────────────────────
-// PERFIL
-// ─────────────────────────────────────────────────────────────
-
-// GET /api/usuarios/:id - Datos del usuario (sin password)
 router.get('/usuarios/:id', soloPropio('id'), async (req, res) => {
   try {
     const id = Number(req.params.id);
@@ -142,13 +127,11 @@ router.get('/usuarios/:id', soloPropio('id'), async (req, res) => {
   }
 });
 
-// PATCH /api/usuarios/:id - Editar datos del perfil
 router.patch('/usuarios/:id', soloPropio('id'), async (req, res) => {
   try {
     const id = Number(req.params.id);
     if (Number.isNaN(id)) return res.status(400).json({ error: 'Id inválido' });
 
-    // Solo se permiten estos campos (nunca rol, password, activo, etc.)
     const camposPermitidos = ['nombre', 'email', 'dni', 'fechaNacimiento', 'celular', 'direccion'] as const;
     const data: Record<string, string | null> = {};
 
@@ -172,7 +155,7 @@ router.patch('/usuarios/:id', soloPropio('id'), async (req, res) => {
     }
     if ('dni' in data && data.dni) {
       if (!esDniValido(data.dni)) return res.status(400).json({ error: ERROR_DNI });
-      data.dni = limpiarDni(data.dni); // siempre solo dígitos
+      data.dni = limpiarDni(data.dni);
     }
     if ('fechaNacimiento' in data && data.fechaNacimiento) {
       const errorFecha = errorFechaNacimiento(data.fechaNacimiento);
@@ -191,10 +174,6 @@ router.patch('/usuarios/:id', soloPropio('id'), async (req, res) => {
   }
 });
 
-// ─────────────────────────────────────────────────────────────
-// FAMILIARES
-// ─────────────────────────────────────────────────────────────
-
 const aplanarFamiliar = (p: any) => ({
   id: p.familiar.id,
   parentesco: p.parentesco,
@@ -206,7 +185,6 @@ const aplanarFamiliar = (p: any) => ({
   
 });
 
-// GET /api/usuarios/:id/familiares
 router.get('/usuarios/:id/familiares', soloPropio('id'), async (req, res) => {
   try {
     const usuarioId = Number(req.params.id);
@@ -225,7 +203,6 @@ router.get('/usuarios/:id/familiares', soloPropio('id'), async (req, res) => {
   }
 });
 
-// POST /api/usuarios/:id/familiares
 router.post('/usuarios/:id/familiares', soloPropio('id'), async (req, res) => {
   try {
     const usuarioId = Number(req.params.id);
@@ -248,7 +225,6 @@ router.post('/usuarios/:id/familiares', soloPropio('id'), async (req, res) => {
     const dniLimpio = limpiarDni(dni);
     const opcional = (v: unknown) => (v == null || String(v).trim() === '' ? null : String(v).trim());
 
-    // Si ya existe un familiar con ese DNI, lo reutilizamos
     let familiar = await prisma.familiar.findFirst({ where: { dni: dniLimpio } });
     if (!familiar) {
       familiar = await prisma.familiar.create({
@@ -278,7 +254,6 @@ router.post('/usuarios/:id/familiares', soloPropio('id'), async (req, res) => {
   }
 });
 
-// DELETE /api/usuarios/:id/familiares/:familiarId
 router.delete('/usuarios/:id/familiares/:familiarId', soloPropio('id'), async (req, res) => {
   try {
     const usuarioId = Number(req.params.id);
@@ -291,7 +266,6 @@ router.delete('/usuarios/:id/familiares/:familiarId', soloPropio('id'), async (r
       where: { usuarioId_familiarId: { usuarioId, familiarId } },
     });
 
-    // Si ningún otro usuario lo tiene como familiar, borramos también el registro
     const restantes = await prisma.parentesco.count({ where: { familiarId } });
     if (restantes === 0) {
       await prisma.familiar.delete({ where: { id: familiarId } });
