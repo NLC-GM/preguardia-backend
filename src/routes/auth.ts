@@ -1,5 +1,8 @@
 import { Router } from 'express';
 import { prisma } from '../prisma';
+import { generarToken } from '../middleware/auth';
+import { hashearPassword, verificarPassword } from '../utils/password';
+import { ERROR_DNI, esDniValido, limpiarDni } from '../utils/validaciones';
 
 const router = Router();
 
@@ -17,15 +20,27 @@ router.post('/login', async (req, res) => {
       include: { hospital: true },
     });
 
-    if (!usuario || usuario.password !== password) {
+    if (!usuario) {
+      return res.status(401).json({ error: 'Correo o contraseña incorrectos' });
+    }
+    const { valida, necesitaRehash } = await verificarPassword(password, usuario.password);
+    if (!valida) {
       return res.status(401).json({ error: 'Correo o contraseña incorrectos' });
     }
     if (!usuario.activo) {
       return res.status(403).json({ error: 'Esta cuenta fue desactivada' });
     }
 
+    // Usuario de antes de bcrypt: guardamos su contraseña hasheada
+    if (necesitaRehash) {
+      await prisma.usuario.update({
+        where: { id: usuario.id },
+        data: { password: await hashearPassword(password) },
+      });
+    }
+
     const { password: _pw, ...usuarioSinPassword } = usuario;
-    return res.json(usuarioSinPassword);
+    return res.json({ token: generarToken(usuario), usuario: usuarioSinPassword });
   } catch (error) {
     console.error(error);
     return res.status(500).json({ error: 'Error al iniciar sesión' });
@@ -41,10 +56,10 @@ router.post('/registro', async (req, res) => {
   }
 
   const emailLimpio = String(email).toLowerCase().trim();
-  const dniLimpio = String(dni).replace(/\D/g, '');
+  const dniLimpio = limpiarDni(dni);
 
-  if (!/^\d{7,8}$/.test(dniLimpio)) {
-    return res.status(400).json({ error: 'El DNI debe tener 7 u 8 números' });
+  if (!esDniValido(dniLimpio)) {
+    return res.status(400).json({ error: ERROR_DNI });
   }
 
   try {
@@ -63,7 +78,7 @@ router.post('/registro', async (req, res) => {
       data: {
         nombre: String(nombre).trim(),
         email: emailLimpio,
-        password,
+        password: await hashearPassword(password),
         dni: dniLimpio,
         rol: 'Paciente',
         activo: true,
@@ -71,7 +86,9 @@ router.post('/registro', async (req, res) => {
     });
 
     const { password: _pw, ...usuarioSinPassword } = nuevoPaciente;
-    return res.status(201).json(usuarioSinPassword);
+    return res
+      .status(201)
+      .json({ token: generarToken(nuevoPaciente), usuario: usuarioSinPassword });
   } catch (error) {
     console.error(error);
     return res.status(500).json({ error: 'Error al crear la cuenta' });
@@ -90,7 +107,7 @@ router.post('/restablecer', async (req, res) => {
   }
 
   const emailLimpio = String(email).toLowerCase().trim();
-  const dniLimpio = String(dni).replace(/\D/g, '');
+  const dniLimpio = limpiarDni(dni);
 
   try {
     const usuario = await prisma.usuario.findUnique({ where: { email: emailLimpio } });
@@ -105,7 +122,7 @@ router.post('/restablecer', async (req, res) => {
 
     await prisma.usuario.update({
       where: { id: usuario.id },
-      data: { password: String(nuevaPassword) },
+      data: { password: await hashearPassword(nuevaPassword) },
     });
 
     return res.json({ mensaje: 'Contraseña actualizada correctamente' });

@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { prisma } from "../prisma";
+import { requiereRol } from "../middleware/auth";
 
 const router = Router();
 
@@ -75,7 +76,7 @@ router.get("/:id", async (req, res) => {
 });
 
 // POST /api/hospitales — crear uno
-router.post("/", async (req, res) => {
+router.post("/", requiereRol("Admin"), async (req, res) => {
   const { nombre, direccion, lat, lon } = req.body;
 
   if (!String(nombre ?? "").trim() || !String(direccion ?? "").trim()) {

@@ -1,4 +1,5 @@
 import { PrismaClient } from '@prisma/client';
+import { hashearPassword } from '../src/utils/password';
 
 const prisma = new PrismaClient();
 
@@ -39,6 +40,9 @@ const formatearEmail = (nombre: string) => {
 async function main() {
   console.log('Iniciando carga de datos (Seeding)...');
 
+  // Contraseña temporal de los admins: "password123" (se guarda hasheada)
+  const passwordAdmin = await hashearPassword('password123');
+
   for (const hosp of hospitalesMock) {
     const emailAdmin = formatearEmail(hosp.nombre);
 
@@ -53,7 +57,7 @@ async function main() {
           create: {
             nombre: `Admin ${hosp.nombre}`,
             email: emailAdmin,
-            password: 'password123', // Contraseña temporal
+            password: passwordAdmin,
             rol: 'Admin',
             activo: true,
           }

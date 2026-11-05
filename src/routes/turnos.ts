@@ -1,7 +1,25 @@
 import { Router } from 'express';
 import { prisma } from '../prisma';
+import { requiereRol, soloPropio, type UsuarioSesion } from '../middleware/auth';
+import { ERROR_DNI, esDniValido, limpiarDni } from '../utils/validaciones';
 
 const router = Router();
+
+// Personal del hospital: puede ver y gestionar los turnos de SU hospital
+const ROLES_PERSONAL = ['Secretaria', 'Admin'];
+const esPersonalDelHospital = (usuario: UsuarioSesion, hospitalId: string) =>
+  ROLES_PERSONAL.includes(usuario.rol) && usuario.hospitalId === hospitalId;
+
+// ¿El usuario creó el turno, o es el paciente del turno (mismo DNI)?
+const esDuenioDelTurno = async (
+  usuario: UsuarioSesion,
+  turno: { creadorId: number | null; pacienteDni: string | null },
+) => {
+  if (turno.creadorId === usuario.id) return true;
+  if (usuario.rol !== 'Paciente' || !turno.pacienteDni) return false;
+  const yo = await prisma.usuario.findUnique({ where: { id: usuario.id }, select: { dni: true } });
+  return !!yo?.dni && yo.dni === turno.pacienteDni;
+};
 
 // Únicos nombres de nivel de triaje permitidos en la base
 const NIVELES_VALIDOS = ['Emergencia', 'Urgente', 'Moderado', 'Leve', 'Sin urgencia'];
@@ -35,30 +53,32 @@ const turnoVigentePorUsuario = (usuarioId: number) =>
 // ─────────────────────────────────────────────────────────────
 
 // POST /api/turnos - El paciente crea un pre-registro desde la app
-router.post('/', async (req, res) => {
+router.post('/', requiereRol('Paciente'), async (req, res) => {
   try {
     const {
-      hospitalId, creadorId, pacienteNombre, pacienteDni, pacienteEdad, pacienteTelefono,
+      hospitalId, pacienteNombre, pacienteDni, pacienteEdad, pacienteTelefono,
       motivo, nivel, color, triaje,
     } = req.body;
+    const creadorId = req.usuario!.id; // sale del token, no del body
 
     if (!NIVELES_VALIDOS.includes(nivel)) {
       return res.status(400).json({ error: `Nivel de triaje inválido: ${nivel}` });
     }
-    if (creadorId != null) {
-      const vigente = await turnoVigentePorUsuario(Number(creadorId));
-      if (vigente) {
-        return res.status(409).json({
-          error: `Ya tenés un turno ${vigente.estado === 'Activo' ? 'activo' : 'pendiente'} en ${vigente.hospital.nombre}. Cancelalo antes de sacar otro.`,
-        });
-      }
+    if (!esDniValido(pacienteDni)) {
+      return res.status(400).json({ error: ERROR_DNI });
+    }
+    const vigente = await turnoVigentePorUsuario(creadorId);
+    if (vigente) {
+      return res.status(409).json({
+        error: `Ya tenés un turno ${vigente.estado === 'Activo' ? 'activo' : 'pendiente'} en ${vigente.hospital.nombre}. Cancelalo antes de sacar otro.`,
+      });
     }
     const nuevoTurno = await prisma.turno.create({
       data: {
         hospitalId,
-        creadorId: creadorId != null ? Number(creadorId) : null,
+        creadorId,
         pacienteNombre,
-        pacienteDni: String(pacienteDni ?? '').replace(/\D/g, ''),
+        pacienteDni: limpiarDni(pacienteDni),
         pacienteEdad: enteroOpcional(pacienteEdad),
         pacienteTelefono: texto(pacienteTelefono),
         motivo: motivo || 'Emergencia',
@@ -94,22 +114,22 @@ router.post('/', async (req, res) => {
 });
 
 // POST /api/turnos/presencial - La secretaria ingresa un paciente que llegó sin pre-registro
-router.post('/presencial', async (req, res) => {
+router.post('/presencial', requiereRol('Secretaria'), async (req, res) => {
   try {
-    const { secretariaId, pacienteNombre, pacienteDni, pacienteEdad, motivo, nivel, color } = req.body;
+    const { pacienteNombre, pacienteDni, pacienteEdad, motivo, nivel, color } = req.body;
 
-    if (!secretariaId || !pacienteNombre?.trim() || !pacienteDni?.trim() || !motivo?.trim() || !nivel) {
+    if (!pacienteNombre?.trim() || !pacienteDni?.trim() || !motivo?.trim() || !nivel) {
       return res.status(400).json({ error: 'Faltan datos obligatorios' });
     }
     if (!NIVELES_VALIDOS.includes(nivel)) {
       return res.status(400).json({ error: `Nivel de triaje inválido: ${nivel}` });
     }
-
-    // El hospital sale de la secretaria, no del frontend
-    const secretaria = await prisma.usuario.findUnique({ where: { id: Number(secretariaId) } });
-    if (!secretaria || secretaria.rol !== 'Secretaria' || !secretaria.activo) {
-      return res.status(403).json({ error: 'No tenés permisos para ingresar pacientes' });
+    if (!esDniValido(pacienteDni)) {
+      return res.status(400).json({ error: ERROR_DNI });
     }
+
+    // La secretaria (y su hospital) salen del token, no del frontend
+    const secretaria = req.usuario!;
     if (!secretaria.hospitalId) {
       return res.status(400).json({ error: 'Tu cuenta no tiene hospital asignado' });
     }
@@ -119,7 +139,7 @@ router.post('/presencial', async (req, res) => {
         hospitalId: secretaria.hospitalId,
         creadorId: secretaria.id,
         pacienteNombre: String(pacienteNombre).trim(),
-        pacienteDni: String(pacienteDni).replace(/\D/g, ''),
+        pacienteDni: limpiarDni(pacienteDni),
         pacienteEdad: enteroOpcional(pacienteEdad),
         motivo: String(motivo).trim(),
         nivel: String(nivel),
@@ -136,24 +156,26 @@ router.post('/presencial', async (req, res) => {
 });
 
 // POST /api/turnos/ambulancia - La ambulancia notifica un traslado al hospital de destino
-router.post('/ambulancia', async (req, res) => {
+router.post('/ambulancia', requiereRol('Ambulancia', 'Profesional'), async (req, res) => {
   try {
     const {
-      ambulanciaId, hospitalId, pacienteNombre, pacienteDni, pacienteEdad, pacienteSexo,
+      hospitalId, pacienteNombre, pacienteDni, pacienteEdad, pacienteSexo,
       pacientePresion, motivo, tipoIncidente, nivel, color, signos,
     } = req.body;
 
-    if (!ambulanciaId || !hospitalId || !nivel) {
+    if (!hospitalId || !nivel) {
       return res.status(400).json({ error: 'Faltan el hospital de destino o la prioridad' });
     }
     if (!NIVELES_VALIDOS.includes(nivel)) {
       return res.status(400).json({ error: `Nivel de triaje inválido: ${nivel}` });
     }
 
-    const ambulancia = await prisma.usuario.findUnique({ where: { id: Number(ambulanciaId) } });
-    if (!ambulancia || !['Ambulancia', 'Profesional'].includes(ambulancia.rol) || !ambulancia.activo) {
-      return res.status(403).json({ error: 'No tenés permisos para notificar traslados' });
+    // El DNI es opcional (paciente NN), pero si viene tiene que ser válido
+    if (limpiarDni(pacienteDni) && !esDniValido(pacienteDni)) {
+      return res.status(400).json({ error: `${ERROR_DNI} (o dejalo vacío)` });
     }
+
+    const ambulancia = req.usuario!; // sale del token, no del body
 
     const hospital = await prisma.hospital.findUnique({ where: { id: String(hospitalId) } });
     if (!hospital) return res.status(404).json({ error: 'Hospital no encontrado' });
@@ -163,7 +185,7 @@ router.post('/ambulancia', async (req, res) => {
         hospitalId: hospital.id,
         creadorId: ambulancia.id,
         pacienteNombre: texto(pacienteNombre) ?? 'NN (no identificado)',
-        pacienteDni: String(pacienteDni ?? '').replace(/\D/g, ''),
+        pacienteDni: limpiarDni(pacienteDni),
         pacienteEdad: enteroOpcional(pacienteEdad),
         pacienteSexo: texto(pacienteSexo),
         pacientePresion: texto(pacientePresion),
@@ -202,6 +224,10 @@ router.post('/ambulancia', async (req, res) => {
 // GET /api/turnos/hospital/:hospitalId?estados=Pendiente,Activo&hoy=1
 router.get('/hospital/:hospitalId', async (req, res) => {
   try {
+    if (!esPersonalDelHospital(req.usuario!, req.params.hospitalId)) {
+      return res.status(403).json({ error: 'Solo podés ver los turnos de tu hospital' });
+    }
+
     const estados = String(req.query.estados ?? 'Pendiente,Activo')
       .split(',')
       .map((s) => s.trim())
@@ -232,7 +258,7 @@ router.get('/hospital/:hospitalId', async (req, res) => {
 });
 
 // GET /api/turnos/ambulancia/:usuarioId - Traslados realizados por esa ambulancia
-router.get('/ambulancia/:usuarioId', async (req, res) => {
+router.get('/ambulancia/:usuarioId', soloPropio('usuarioId'), async (req, res) => {
   try {
     const usuarioId = Number(req.params.usuarioId);
     if (Number.isNaN(usuarioId)) return res.status(400).json({ error: 'Id inválido' });
@@ -251,7 +277,7 @@ router.get('/ambulancia/:usuarioId', async (req, res) => {
 });
 
 // GET /api/turnos/paciente/:usuarioId/activo - Turno vigente del paciente (o null)
-router.get('/paciente/:usuarioId/activo', async (req, res) => {
+router.get('/paciente/:usuarioId/activo', soloPropio('usuarioId'), async (req, res) => {
   try {
     const usuarioId = Number(req.params.usuarioId);
     if (Number.isNaN(usuarioId)) return res.status(400).json({ error: 'Id inválido' });
@@ -307,7 +333,7 @@ router.get('/paciente/:usuarioId/activo', async (req, res) => {
 });
 
 // GET /api/turnos/paciente/:usuarioId/historial - Finalizados y cancelados del paciente
-router.get('/paciente/:usuarioId/historial', async (req, res) => {
+router.get('/paciente/:usuarioId/historial', soloPropio('usuarioId'), async (req, res) => {
   try {
     const usuarioId = Number(req.params.usuarioId);
     if (Number.isNaN(usuarioId)) return res.status(400).json({ error: 'Id inválido' });
@@ -338,7 +364,7 @@ router.get('/paciente/:usuarioId/historial', async (req, res) => {
 // UN TURNO (estas rutas van al final porque usan /:id)
 // ─────────────────────────────────────────────────────────────
 // GET /api/turnos/usuario/:usuarioId/vigente - ¿Este usuario ya tiene un turno pendiente o activo?
-router.get('/usuario/:usuarioId/vigente', async (req, res) => {
+router.get('/usuario/:usuarioId/vigente', soloPropio('usuarioId'), async (req, res) => {
   try {
     const usuarioId = Number(req.params.usuarioId);
     if (Number.isNaN(usuarioId)) return res.status(400).json({ error: 'Id inválido' });
@@ -361,6 +387,11 @@ router.get('/:id', async (req, res) => {
     });
     if (!turno) return res.status(404).json({ error: 'Turno no encontrado' });
 
+    const usuario = req.usuario!;
+    if (!esPersonalDelHospital(usuario, turno.hospitalId) && !(await esDuenioDelTurno(usuario, turno))) {
+      return res.status(403).json({ error: 'No tenés permisos para ver este turno' });
+    }
+
     return res.json(turno);
   } catch (error) {
     console.error(error);
@@ -369,10 +400,16 @@ router.get('/:id', async (req, res) => {
 });
 
 // PATCH /api/turnos/:id - La secretaria edita la ficha (re-evaluación)
-router.patch('/:id', async (req, res) => {
+router.patch('/:id', requiereRol(...ROLES_PERSONAL), async (req, res) => {
   try {
     const id = Number(req.params.id);
     if (Number.isNaN(id)) return res.status(400).json({ error: 'Id inválido' });
+
+    const existente = await prisma.turno.findUnique({ where: { id }, select: { hospitalId: true } });
+    if (!existente) return res.status(404).json({ error: 'Turno no encontrado' });
+    if (!esPersonalDelHospital(req.usuario!, existente.hospitalId)) {
+      return res.status(403).json({ error: 'Solo podés editar turnos de tu hospital' });
+    }
 
     const { motivo, nivel, color } = req.body;
 
@@ -406,8 +443,29 @@ router.patch('/:id/estado', async (req, res) => {
       return res.status(400).json({ error: 'Estado inválido' });
     }
 
+    const id = Number(req.params.id);
+    if (Number.isNaN(id)) return res.status(400).json({ error: 'Id inválido' });
+
+    const existente = await prisma.turno.findUnique({
+      where: { id },
+      select: { hospitalId: true, creadorId: true, pacienteDni: true },
+    });
+    if (!existente) return res.status(404).json({ error: 'Turno no encontrado' });
+
+    // El personal del hospital puede cualquier estado; el creador o el paciente
+    // solo pueden avisar que llegaron (Activo) o cancelar
+    const usuario = req.usuario!;
+    if (!esPersonalDelHospital(usuario, existente.hospitalId)) {
+      if (!(await esDuenioDelTurno(usuario, existente))) {
+        return res.status(403).json({ error: 'No tenés permisos para modificar este turno' });
+      }
+      if (estado === 'Finalizado') {
+        return res.status(403).json({ error: 'Solo el personal del hospital puede finalizar un turno' });
+      }
+    }
+
     const turno = await prisma.turno.update({
-      where: { id: Number(req.params.id) },
+      where: { id },
       data: {
         estado,
         ...(estado === 'Cancelado' ? { valido: false } : {}),

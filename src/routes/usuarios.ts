@@ -1,5 +1,8 @@
 import { Router } from 'express';
 import { prisma } from '../prisma';
+import { requiereRol, soloPropio } from '../middleware/auth';
+import { hashearPassword } from '../utils/password';
+import { ERROR_DNI, errorFechaNacimiento, esDniValido, limpiarDni } from '../utils/validaciones';
 
 const router = Router();
 
@@ -29,21 +32,22 @@ const SELECT_USUARIO = {
 // ─────────────────────────────────────────────────────────────
 
 // POST /api/usuarios/personal - El admin crea personal para SU hospital
-router.post('/usuarios/personal', async (req, res) => {
+router.post('/usuarios/personal', requiereRol('Admin'), async (req, res) => {
   try {
-    const { adminId, nombre, dni, email, password, rol } = req.body;
+    const { nombre, dni, email, password, rol } = req.body;
 
-    if (!adminId || !nombre?.trim() || !dni?.trim() || !email?.trim() || !password || !rol) {
+    if (!nombre?.trim() || !dni?.trim() || !email?.trim() || !password || !rol) {
       return res.status(400).json({ error: 'Faltan datos obligatorios' });
     }
     if (!['Secretaria', 'Ambulancia'].includes(rol)) {
       return res.status(400).json({ error: 'Rol inválido' });
     }
-
-    const admin = await prisma.usuario.findUnique({ where: { id: Number(adminId) } });
-    if (!admin || admin.rol !== 'Admin' || !admin.activo) {
-      return res.status(403).json({ error: 'No tenés permisos para crear personal' });
+    if (!esDniValido(dni)) {
+      return res.status(400).json({ error: ERROR_DNI });
     }
+
+    // El admin sale del token, no del body
+    const admin = req.usuario!;
     if (!admin.hospitalId) {
       return res.status(400).json({ error: 'Tu cuenta de administrador no tiene hospital asignado' });
     }
@@ -51,9 +55,9 @@ router.post('/usuarios/personal', async (req, res) => {
     const nuevoUsuario = await prisma.usuario.create({
       data: {
         nombre: String(nombre).trim(),
-        dni: String(dni).replace(/\D/g, ''),
+        dni: limpiarDni(dni),
         email: String(email).toLowerCase().trim(),
-        password,
+        password: await hashearPassword(password),
         rol,
         hospitalId: admin.hospitalId,
         activo: true,
@@ -72,8 +76,12 @@ router.post('/usuarios/personal', async (req, res) => {
 });
 
 // GET /api/hospitales/:hospitalId/personal - Personal activo de un hospital
-router.get('/hospitales/:hospitalId/personal', async (req, res) => {
+router.get('/hospitales/:hospitalId/personal', requiereRol('Admin'), async (req, res) => {
   try {
+    if (req.usuario!.hospitalId !== req.params.hospitalId) {
+      return res.status(403).json({ error: 'Solo podés ver el personal de tu hospital' });
+    }
+
     const personal = await prisma.usuario.findMany({
       where: {
         hospitalId: req.params.hospitalId,
@@ -90,12 +98,23 @@ router.get('/hospitales/:hospitalId/personal', async (req, res) => {
 });
 
 // PATCH /api/usuarios/:id/desactivar - Borrado lógico
-router.patch('/usuarios/:id/desactivar', async (req, res) => {
+router.patch('/usuarios/:id/desactivar', requiereRol('Admin'), async (req, res) => {
   try {
-    await prisma.usuario.update({
-      where: { id: Number(req.params.id) },
-      data: { activo: false },
-    });
+    const id = Number(req.params.id);
+    if (Number.isNaN(id)) return res.status(400).json({ error: 'Id inválido' });
+
+    const usuario = await prisma.usuario.findUnique({ where: { id } });
+    if (!usuario) return res.status(404).json({ error: 'Usuario no encontrado' });
+
+    // Un admin solo puede desactivar secretarias y ambulancias de su propio hospital
+    if (
+      !['Secretaria', 'Ambulancia'].includes(usuario.rol) ||
+      usuario.hospitalId !== req.usuario!.hospitalId
+    ) {
+      return res.status(403).json({ error: 'Solo podés desactivar personal de tu hospital' });
+    }
+
+    await prisma.usuario.update({ where: { id }, data: { activo: false } });
     return res.json({ mensaje: 'Usuario desactivado correctamente' });
   } catch (error) {
     console.error(error);
@@ -108,7 +127,7 @@ router.patch('/usuarios/:id/desactivar', async (req, res) => {
 // ─────────────────────────────────────────────────────────────
 
 // GET /api/usuarios/:id - Datos del usuario (sin password)
-router.get('/usuarios/:id', async (req, res) => {
+router.get('/usuarios/:id', soloPropio('id'), async (req, res) => {
   try {
     const id = Number(req.params.id);
     if (Number.isNaN(id)) return res.status(400).json({ error: 'Id inválido' });
@@ -124,7 +143,7 @@ router.get('/usuarios/:id', async (req, res) => {
 });
 
 // PATCH /api/usuarios/:id - Editar datos del perfil
-router.patch('/usuarios/:id', async (req, res) => {
+router.patch('/usuarios/:id', soloPropio('id'), async (req, res) => {
   try {
     const id = Number(req.params.id);
     if (Number.isNaN(id)) return res.status(400).json({ error: 'Id inválido' });
@@ -152,10 +171,12 @@ router.patch('/usuarios/:id', async (req, res) => {
       data.email = data.email.toLowerCase();
     }
     if ('dni' in data && data.dni) {
-      data.dni = data.dni.replace(/\D/g, ''); // siempre solo dígitos
-      if (!/^\d{7,8}$/.test(data.dni)) {
-        return res.status(400).json({ error: 'El DNI debe tener 7 u 8 números' });
-      }
+      if (!esDniValido(data.dni)) return res.status(400).json({ error: ERROR_DNI });
+      data.dni = limpiarDni(data.dni); // siempre solo dígitos
+    }
+    if ('fechaNacimiento' in data && data.fechaNacimiento) {
+      const errorFecha = errorFechaNacimiento(data.fechaNacimiento);
+      if (errorFecha) return res.status(400).json({ error: errorFecha });
     }
 
     const usuario = await prisma.usuario.update({ where: { id }, data, select: SELECT_USUARIO });
@@ -186,7 +207,7 @@ const aplanarFamiliar = (p: any) => ({
 });
 
 // GET /api/usuarios/:id/familiares
-router.get('/usuarios/:id/familiares', async (req, res) => {
+router.get('/usuarios/:id/familiares', soloPropio('id'), async (req, res) => {
   try {
     const usuarioId = Number(req.params.id);
     if (Number.isNaN(usuarioId)) return res.status(400).json({ error: 'Id inválido' });
@@ -205,7 +226,7 @@ router.get('/usuarios/:id/familiares', async (req, res) => {
 });
 
 // POST /api/usuarios/:id/familiares
-router.post('/usuarios/:id/familiares', async (req, res) => {
+router.post('/usuarios/:id/familiares', soloPropio('id'), async (req, res) => {
   try {
     const usuarioId = Number(req.params.id);
     if (Number.isNaN(usuarioId)) return res.status(400).json({ error: 'Id inválido' });
@@ -215,11 +236,16 @@ router.post('/usuarios/:id/familiares', async (req, res) => {
     if (!parentesco || !nombre?.trim() || !dni?.trim() || !fechaNacimiento?.trim()) {
       return res.status(400).json({ error: 'Faltan datos obligatorios' });
     }
+    if (!esDniValido(dni)) {
+      return res.status(400).json({ error: ERROR_DNI });
+    }
+    const errorFecha = errorFechaNacimiento(fechaNacimiento);
+    if (errorFecha) return res.status(400).json({ error: errorFecha });
 
     const usuario = await prisma.usuario.findUnique({ where: { id: usuarioId } });
     if (!usuario) return res.status(404).json({ error: 'Usuario no encontrado' });
 
-    const dniLimpio = String(dni).replace(/\D/g, '');
+    const dniLimpio = limpiarDni(dni);
     const opcional = (v: unknown) => (v == null || String(v).trim() === '' ? null : String(v).trim());
 
     // Si ya existe un familiar con ese DNI, lo reutilizamos
@@ -253,7 +279,7 @@ router.post('/usuarios/:id/familiares', async (req, res) => {
 });
 
 // DELETE /api/usuarios/:id/familiares/:familiarId
-router.delete('/usuarios/:id/familiares/:familiarId', async (req, res) => {
+router.delete('/usuarios/:id/familiares/:familiarId', soloPropio('id'), async (req, res) => {
   try {
     const usuarioId = Number(req.params.id);
     const familiarId = Number(req.params.familiarId);
